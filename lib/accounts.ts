@@ -1,7 +1,4 @@
 import { randomUUID } from "crypto"
-import { readFile, writeFile } from "fs/promises"
-import { existsSync, mkdirSync } from "fs"
-import { join } from "path"
 
 interface StoredAccount {
   id: string
@@ -9,45 +6,81 @@ interface StoredAccount {
   cookie: string
 }
 
-const DATA_DIR = join(process.cwd(), "data")
-const ACCOUNTS_FILE = join(DATA_DIR, "accounts.json")
+const KV_KEY = "mimo:accounts"
 
-// In-memory cache to avoid repeated disk reads
-let accountsCache: StoredAccount[] | null = null
-let cacheTimestamp = 0
-const CACHE_TTL = 5_000 // 5 seconds
+// In-memory fallback for development or when KV is not configured
+let memoryStore: StoredAccount[] | null = null
 
-function ensureDataDir() {
-  if (!existsSync(DATA_DIR)) {
-    mkdirSync(DATA_DIR, { recursive: true })
-  }
+function isKVConfigured(): boolean {
+  return !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN)
+}
+
+async function getKVClient() {
+  if (!isKVConfigured()) return null
+  const { kv } = await import("@vercel/kv")
+  return kv
 }
 
 async function readAccounts(): Promise<StoredAccount[]> {
-  const now = Date.now()
-  if (accountsCache && now - cacheTimestamp < CACHE_TTL) {
-    return accountsCache
+  const kv = await getKVClient()
+  
+  if (kv) {
+    // Use Vercel KV in production
+    const data = await kv.get<StoredAccount[]>(KV_KEY)
+    return data ?? []
   }
-
-  ensureDataDir()
-  if (!existsSync(ACCOUNTS_FILE)) {
-    await writeFile(ACCOUNTS_FILE, "[]")
-    accountsCache = []
-    cacheTimestamp = now
-    return []
+  
+  // Fallback: file-based storage in development
+  if (process.env.NODE_ENV === "development") {
+    try {
+      const { readFile, existsSync } = await import("fs")
+      const { join } = await import("path")
+      const DATA_DIR = join(process.cwd(), "data")
+      const ACCOUNTS_FILE = join(DATA_DIR, "accounts.json")
+      
+      if (existsSync(ACCOUNTS_FILE)) {
+        const data = await readFile(ACCOUNTS_FILE, "utf-8")
+        return JSON.parse(data) as StoredAccount[]
+      }
+    } catch {
+      // Ignore file errors
+    }
   }
-  const data = await readFile(ACCOUNTS_FILE, "utf-8")
-  const parsed = JSON.parse(data) as StoredAccount[]
-  accountsCache = parsed
-  cacheTimestamp = now
-  return parsed
+  
+  // Final fallback: in-memory store
+  return memoryStore ?? []
 }
 
-export async function writeAccounts(accounts: StoredAccount[]) {
-  ensureDataDir()
-  await writeFile(ACCOUNTS_FILE, JSON.stringify(accounts, null, 2))
-  accountsCache = accounts
-  cacheTimestamp = Date.now()
+async function writeAccounts(accounts: StoredAccount[]): Promise<void> {
+  const kv = await getKVClient()
+  
+  if (kv) {
+    // Use Vercel KV in production
+    await kv.set(KV_KEY, accounts)
+    return
+  }
+  
+  // Fallback: file-based storage in development
+  if (process.env.NODE_ENV === "development") {
+    try {
+      const { writeFile, mkdirSync, existsSync } = await import("fs")
+      const { join } = await import("path")
+      const DATA_DIR = join(process.cwd(), "data")
+      
+      if (!existsSync(DATA_DIR)) {
+        mkdirSync(DATA_DIR, { recursive: true })
+      }
+      
+      const ACCOUNTS_FILE = join(DATA_DIR, "accounts.json")
+      await writeFile(ACCOUNTS_FILE, JSON.stringify(accounts, null, 2))
+      return
+    } catch {
+      // Ignore file errors
+    }
+  }
+  
+  // Final fallback: in-memory store
+  memoryStore = accounts
 }
 
 export async function getAccounts(): Promise<StoredAccount[]> {
@@ -91,6 +124,10 @@ export async function deleteAccount(id: string): Promise<boolean> {
   accounts.splice(index, 1)
   await writeAccounts(accounts)
   return true
+}
+
+export async function deleteAllAccounts(): Promise<void> {
+  await writeAccounts([])
 }
 
 /**

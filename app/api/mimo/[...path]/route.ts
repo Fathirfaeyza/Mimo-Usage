@@ -64,7 +64,8 @@ export async function GET(
       )
 
       try {
-        const refreshRes = await fetch("http://127.0.0.1:8787/api/refresh", {
+        const refreshUrl = new URL("/api/refresh", request.url)
+        const refreshRes = await fetch(refreshUrl.toString(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ cookie }),

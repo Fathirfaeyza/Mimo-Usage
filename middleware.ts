@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { getSessionCookieName, isAuthEnabled, decryptSession } from "@/lib/auth"
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   // Only apply to routes that need protection
   // By default, we want to protect the dashboard routes, but allow API routes and static assets.
   const { pathname } = request.nextUrl
