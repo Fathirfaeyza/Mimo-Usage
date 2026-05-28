@@ -1,2 +1,2 @@
 // Polling Intervals (in milliseconds)
-export const USAGE_REFRESH_INTERVAL = 60000 // 1 minute
+export const USAGE_REFRESH_INTERVAL = 300000 // 5 minutes

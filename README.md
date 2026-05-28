@@ -27,9 +27,13 @@ flowchart LR
     end
 
     subgraph Server [Next.js API]
-        Proxy[Edge Middleware]
+        Proxy[API Routes]
         Auth[JWT Session]
         Xiaomi[Xiaomi API Service]
+    end
+
+    subgraph Database [Upstash]
+        Redis[(Redis Storage)]
     end
 
     subgraph External [Xiaomi Cloud]
@@ -40,6 +44,7 @@ flowchart LR
     Proxy -->|Verify JWT| Auth
     Auth -->|If Valid| Xiaomi
     Xiaomi <-->|Fetch Quotas| MiApi
+    Xiaomi <-->|Store/Refresh Cookies| Redis
 ```
 
 ## Features
@@ -56,6 +61,7 @@ flowchart LR
 - **Styling**: [Tailwind CSS v4](https://tailwindcss.com/) & [shadcn/ui](https://ui.shadcn.com/)
 - **Icons**: [Phosphor Icons](https://phosphoricons.com/)
 - **Auth**: [Jose](https://github.com/panva/jose) (JWT)
+- **Database**: [Upstash Redis](https://upstash.com/) (Serverless Session Storage)
 
 ## Getting Started
 
@@ -72,6 +78,10 @@ flowchart LR
 
    # Secret for JWT signing
    AUTH_SECRET="your-32-byte-hex-string"
+
+   # Upstash Redis (Required for session storage)
+   UPSTASH_REDIS_REST_URL="https://your-upstash-url.upstash.io"
+   UPSTASH_REDIS_REST_TOKEN="your-upstash-token"
    ```
 
 3. **Run the development server:**
@@ -95,6 +105,6 @@ We welcome contributions to MiMo Usage! If you want to add a new feature or fix 
 
 Easily deploy your own instance of MiMo Usage to Vercel with a single click:
 
-<a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2F0xtbug%2FMimo-Usage&env=AUTH_SECRET,DASHBOARD_PASSWORD">
+<a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2F0xtbug%2FMimo-Usage&env=AUTH_SECRET,DASHBOARD_PASSWORD,UPSTASH_REDIS_REST_URL,UPSTASH_REDIS_REST_TOKEN">
   <img src="https://vercel.com/button" alt="Deploy with Vercel" />
 </a>

@@ -1,86 +1,48 @@
 import { randomUUID } from "crypto"
+import { Redis } from "@upstash/redis"
 
-interface StoredAccount {
+export interface StoredAccount {
   id: string
   name: string
   cookie: string
 }
 
-const KV_KEY = "mimo:accounts"
+const REDIS_KEY = "mimo_accounts"
 
-// In-memory fallback for development or when KV is not configured
-let memoryStore: StoredAccount[] | null = null
+// Initialize Redis from environment variables
+const redis = Redis.fromEnv()
 
-function isKVConfigured(): boolean {
-  return !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN)
-}
-
-async function getKVClient() {
-  if (!isKVConfigured()) return null
-  const { kv } = await import("@vercel/kv")
-  return kv
-}
+let accountsPromise: Promise<StoredAccount[]> | null = null
+let cacheTimestamp = 0
+const CACHE_TTL = 5_000 // 5 seconds
 
 async function readAccounts(): Promise<StoredAccount[]> {
-  const kv = await getKVClient()
-  
-  if (kv) {
-    // Use Vercel KV in production
-    const data = await kv.get<StoredAccount[]>(KV_KEY)
-    return data ?? []
+  const now = Date.now()
+  if (accountsPromise && now - cacheTimestamp < CACHE_TTL) {
+    return accountsPromise
   }
-  
-  // Fallback: file-based storage in development
-  if (process.env.NODE_ENV === "development") {
-    try {
-      const { readFile, existsSync } = await import("fs")
-      const { join } = await import("path")
-      const DATA_DIR = join(process.cwd(), "data")
-      const ACCOUNTS_FILE = join(DATA_DIR, "accounts.json")
-      
-      if (existsSync(ACCOUNTS_FILE)) {
-        const data = await readFile(ACCOUNTS_FILE, "utf-8")
-        return JSON.parse(data) as StoredAccount[]
-      }
-    } catch {
-      // Ignore file errors
-    }
-  }
-  
-  // Final fallback: in-memory store
-  return memoryStore ?? []
+
+  accountsPromise = redis
+    .get<StoredAccount[]>(REDIS_KEY)
+    .then((data) => data || [])
+    .catch((err) => {
+      console.error("Failed to read accounts from Redis", err)
+      return []
+    })
+
+  cacheTimestamp = now
+  return accountsPromise
 }
 
-async function writeAccounts(accounts: StoredAccount[]): Promise<void> {
-  const kv = await getKVClient()
-  
-  if (kv) {
-    // Use Vercel KV in production
-    await kv.set(KV_KEY, accounts)
-    return
+export async function writeAccounts(accounts: StoredAccount[]) {
+  try {
+    await redis.set(REDIS_KEY, accounts)
+    // Instantly update local cache to ensure consistency
+    accountsPromise = Promise.resolve(accounts)
+    cacheTimestamp = Date.now()
+  } catch (err) {
+    console.error("Failed to write accounts to Redis", err)
   }
-  
-  // Fallback: file-based storage in development
-  if (process.env.NODE_ENV === "development") {
-    try {
-      const { writeFile, mkdirSync, existsSync } = await import("fs")
-      const { join } = await import("path")
-      const DATA_DIR = join(process.cwd(), "data")
-      
-      if (!existsSync(DATA_DIR)) {
-        mkdirSync(DATA_DIR, { recursive: true })
-      }
-      
-      const ACCOUNTS_FILE = join(DATA_DIR, "accounts.json")
-      await writeFile(ACCOUNTS_FILE, JSON.stringify(accounts, null, 2))
-      return
-    } catch {
-      // Ignore file errors
-    }
-  }
-  
-  // Final fallback: in-memory store
-  memoryStore = accounts
 }
 
 export async function getAccounts(): Promise<StoredAccount[]> {
@@ -124,10 +86,6 @@ export async function deleteAccount(id: string): Promise<boolean> {
   accounts.splice(index, 1)
   await writeAccounts(accounts)
   return true
-}
-
-export async function deleteAllAccounts(): Promise<void> {
-  await writeAccounts([])
 }
 
 /**
